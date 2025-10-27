@@ -26,6 +26,6 @@
   "require": {
     "php": "^7.4",
     "league/flysystem": "^2.5",
-    "azure-oss/storage": "dev-local"
+    "azure-oss/storage": "dev-main"
   }
 }
