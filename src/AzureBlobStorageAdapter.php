@@ -10,44 +10,52 @@ use AzureOss\Storage\Blob\Models\BlobProperties;
 use AzureOss\Storage\Blob\Models\GetBlobsOptions;
 use AzureOss\Storage\Blob\Models\UploadBlobOptions;
 use AzureOss\Storage\Blob\Sas\BlobSasBuilder;
-use League\Flysystem\ChecksumAlgoIsNotSupported;
-use League\Flysystem\ChecksumProvider;
 use League\Flysystem\Config;
 use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\FileAttributes;
 use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\PathPrefixer;
-use League\Flysystem\UnableToCheckExistence;
 use League\Flysystem\UnableToCopyFile;
 use League\Flysystem\UnableToDeleteDirectory;
 use League\Flysystem\UnableToDeleteFile;
-use League\Flysystem\UnableToListContents;
 use League\Flysystem\UnableToMoveFile;
-use League\Flysystem\UnableToProvideChecksum;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
 use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
-use League\Flysystem\UrlGeneration\PublicUrlGenerator;
-use League\Flysystem\UrlGeneration\TemporaryUrlGenerator;
 use League\MimeTypeDetection\FinfoMimeTypeDetector;
 use League\MimeTypeDetection\MimeTypeDetector;
 
-final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvider, TemporaryUrlGenerator, PublicUrlGenerator
+final class AzureBlobStorageAdapter implements FilesystemAdapter
 {
+    /**
+     * @readonly
+     */
+    private BlobContainerClient $containerClient;
+    /**
+     * @readonly
+     */
+    private string $visibilityHandling = self::ON_VISIBILITY_THROW_ERROR;
     public const ON_VISIBILITY_THROW_ERROR = 'throw';
     public const ON_VISIBILITY_IGNORE = 'ignore';
 
-    private readonly MimeTypeDetector $mimeTypeDetector;
-    private readonly PathPrefixer $prefixer;
+    /**
+     * @readonly
+     */
+    private MimeTypeDetector $mimeTypeDetector;
+    /**
+     * @readonly
+     */
+    private PathPrefixer $prefixer;
 
     public function __construct(
-        private readonly BlobContainerClient $containerClient,
+        BlobContainerClient $containerClient,
         string $prefix = "",
         ?MimeTypeDetector $mimeTypeDetector = null,
-        private readonly string $visibilityHandling = self::ON_VISIBILITY_THROW_ERROR,
-        private readonly bool $useDirectPublicUrl = false,
+        string $visibilityHandling = self::ON_VISIBILITY_THROW_ERROR
     ) {
+        $this->containerClient = $containerClient;
+        $this->visibilityHandling = $visibilityHandling;
         $this->prefixer = new PathPrefixer($prefix);
         $this->mimeTypeDetector = $mimeTypeDetector ?? new FinfoMimeTypeDetector();
     }
@@ -59,14 +67,14 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
                 ->getBlobClient($this->prefixer->prefixPath($path))
                 ->exists();
         } catch (\Throwable $e) {
-            throw UnableToCheckExistence::forLocation($path, $e);
+            throw new \InvalidArgumentException($path, 0, $e);
         }
     }
 
     public function directoryExists(string $path): bool
     {
         try {
-            $options = new GetBlobsOptions(pageSize: 1);
+            $options = new GetBlobsOptions(1);
 
             foreach (
                 $this->containerClient->getBlobs(
@@ -79,7 +87,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
 
             return false;
         } catch (\Throwable $e) {
-            throw UnableToCheckExistence::forLocation($path, $e);
+            throw new \InvalidArgumentException($path, 0, $e);
         }
     }
 
@@ -103,14 +111,14 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
             $mimetype = $this->mimeTypeDetector->detectMimetype($path, $contents);
 
             $options = new UploadBlobOptions(
-                contentType: $mimetype,
+                $mimetype,
             );
 
             $this->containerClient
                 ->getBlobClient($path)
                 ->upload($contents, $options);
         } catch (\Throwable $e) {
-            throw UnableToWriteFile::atLocation($path, previous: $e);
+            throw UnableToWriteFile::atLocation($path, '', $e);
         }
     }
 
@@ -123,7 +131,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
 
             return $result->content->getContents();
         } catch (\Throwable $e) {
-            throw UnableToReadFile::fromLocation($path, previous: $e);
+            throw UnableToReadFile::fromLocation($path, '', $e);
         }
     }
 
@@ -142,7 +150,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
 
             return $resource;
         } catch (\Throwable $e) {
-            throw UnableToReadFile::fromLocation($path, previous: $e);
+            throw UnableToReadFile::fromLocation($path, '', $e);
         }
     }
 
@@ -153,7 +161,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
                 ->getBlobClient($this->prefixer->prefixPath($path))
                 ->deleteIfExists();
         } catch (\Throwable $e) {
-            throw UnableToDeleteFile::atLocation($path, previous: $e);
+            throw UnableToDeleteFile::atLocation($path, '', $e);
         }
     }
 
@@ -168,7 +176,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
                 }
             }
         } catch (\Throwable $e) {
-            throw UnableToDeleteDirectory::atLocation($path, previous: $e);
+            throw UnableToDeleteDirectory::atLocation($path, '', $e);
         }
     }
 
@@ -194,7 +202,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
         try {
             return $this->fetchMetadata($path);
         } catch (\Throwable $e) {
-            throw UnableToRetrieveMetadata::mimeType($path, previous: $e);
+            throw UnableToRetrieveMetadata::mimeType($path, '', $e);
         }
     }
 
@@ -203,7 +211,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
         try {
             return $this->fetchMetadata($path);
         } catch (\Throwable $e) {
-            throw UnableToRetrieveMetadata::lastModified($path, previous: $e);
+            throw UnableToRetrieveMetadata::lastModified($path, '', $e);
         }
     }
 
@@ -212,7 +220,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
         try {
             return $this->fetchMetadata($path);
         } catch (\Throwable $e) {
-            throw UnableToRetrieveMetadata::lastModified($path, previous: $e);
+            throw UnableToRetrieveMetadata::lastModified($path, '', $e);
         }
     }
 
@@ -249,18 +257,13 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
                 }
             }
         } catch (\Throwable $e) {
-            throw UnableToListContents::atLocation($path, $deep, $e);
+            throw new \InvalidArgumentException($path, 0, $e);
         }
     }
 
     private function normalizeBlob(string $name, BlobProperties $properties): FileAttributes
     {
-        return new FileAttributes(
-            $name,
-            fileSize: $properties->contentLength,
-            lastModified: $properties->lastModified->getTimestamp(),
-            mimeType: $properties->contentType,
-        );
+        return new FileAttributes($name, $properties->contentLength, null, $properties->lastModified->getTimestamp(), $properties->contentType);
     }
 
     public function move(string $source, string $destination, Config $config): void
@@ -281,23 +284,17 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
             $sourceBlobClient = $this->containerClient->getBlobClient($this->prefixer->prefixPath($source));
             $targetBlobClient = $this->containerClient->getBlobClient($this->prefixer->prefixPath($destination));
 
-            $targetBlobClient->syncCopyFromUri($sourceBlobClient->uri);
+            $targetBlobClient->copyFromUri($sourceBlobClient->uri);
         } catch (\Throwable $e) {
             throw UnableToCopyFile::fromLocationTo($source, $destination, $e);
         }
     }
 
     /**
-     * @description If useDirectPublicUrl is true, returns the direct public URL.
-     * Otherwise, Azure doesn't support permanent URLs, so we create one that lasts 1000 years.
+     * @description Azure doesn't support permanent URLs. Instead, we create one that lasts 1000 years.
      */
     public function publicUrl(string $path, Config $config): string
     {
-        if ($this->useDirectPublicUrl) {
-            $blobClient = $this->containerClient->getBlobClient($this->prefixer->prefixPath($path));
-            return (string) $blobClient->uri;
-        }
-
         return $this->temporaryUrl($path, (new \DateTimeImmutable())->modify("+1000 years"), $config);
     }
 
@@ -324,7 +321,7 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
         $algo = $config->get('checksum_algo', 'md5');
 
         if ($algo !== 'md5') {
-            throw new ChecksumAlgoIsNotSupported();
+            throw new \InvalidArgumentException();
         }
 
         try {
@@ -332,12 +329,12 @@ final class AzureBlobStorageAdapter implements FilesystemAdapter, ChecksumProvid
                 ->getBlobClient($this->prefixer->prefixPath($path))
                 ->getProperties();
         } catch (\Throwable $e) {
-            throw new UnableToProvideChecksum($e->getMessage(), $path, $e);
+            throw new \InvalidArgumentException($e->getMessage(), $path, $e);
         }
 
         $md5 = $properties->contentMD5;
         if ($md5 === null) {
-            throw new UnableToProvideChecksum(reason: 'File does not have a checksum set in Azure', path: $path);
+            throw new \InvalidArgumentException('File does not have a checksum set in Azure '.$path);
         }
         return $md5;
     }

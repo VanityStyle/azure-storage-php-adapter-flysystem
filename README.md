@@ -9,7 +9,7 @@
 
 ## Minimum Requirements
 
-* PHP 8.1 or above
+* PHP 7.4 or above
 * Required PHP extensions
     * curl
     * json
@@ -21,41 +21,21 @@
 composer require azure-oss/storage-blob-flysystem
 ```
 
-## Usage
+## Quickstart
 
 ```php
 use AzureOss\FlysystemAzureBlobStorage\AzureBlobStorageAdapter;
 use AzureOss\Storage\Blob\BlobServiceClient;
 use League\Flysystem\Filesystem;
 
-// Create a BlobContainerClient
-$containerClient = BlobServiceClient::fromConnectionString($connectionString)
-    ->getContainerClient('your-container-name');
+$blobServiceClient = BlobServiceClient::fromConnectionString('<connection-string>');
+$containerClient = $blobServiceClient->getContainerClient('quickstart');
 
-// Create the adapter
-$adapter = new AzureBlobStorageAdapter(
-    $containerClient,
-    'optional-prefix',
-    useDirectPublicUrl: false, // Set to true to use direct public URLs instead of SAS tokens
-);
-
-// Create the filesystem
+$adapter = new AzureBlobStorageAdapter($containerClient, "optional/prefix");
 $filesystem = new Filesystem($adapter);
+
+$filesystem->write('hello', 'world!');
 ```
-
-### Public URLs
-
-By default, the adapter generates public URLs using SAS tokens with a 1000-year expiration. If you prefer to use direct public URLs without SAS tokens, you can set the `useDirectPublicUrl` parameter to `true`:
-
-```php
-$adapter = new AzureBlobStorageAdapter(
-    $containerClient,
-    'optional-prefix',
-    useDirectPublicUrl: true,
-);
-```
-
-Note that for direct public URLs to work, your container must be configured with public access. If your container is private, you should use the default SAS token approach.
 
 ## Documentation
 
